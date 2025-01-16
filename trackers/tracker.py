@@ -6,14 +6,20 @@ import numpy as np
 import pandas as pd
 import cv2
 import sys 
+from sports.annotators.soccer import draw_pitch, draw_points_on_pitch
+from sports.common.ball import BallTracker, BallAnnotator
+from sports.common.team import TeamClassifier
+from sports.common.view import ViewTransformer
+from sports.configs.soccer import SoccerPitchConfiguration
 sys.path.append('../')
 from utils import get_center_of_bbox, get_bbox_width, get_foot_position
 
 class Tracker:
-    def __init__(self, model_path):
+    def __init__(self, model_path,pitch_detection_model):
         self.model = YOLO(model_path) 
         self.tracker = sv.ByteTrack()
-
+        self.pitch_model=YOLO(pitch_detection_model)
+       
     def add_position_to_tracks(sekf,tracks):
         for object, object_tracks in tracks.items():
             for frame_num, track in enumerate(object_tracks):
@@ -43,12 +49,12 @@ class Tracker:
         for i in range(0,len(frames),batch_size):
             detections_batch = self.model.predict(frames[i:i+batch_size],conf=0.1)
             detections += detections_batch
+            print("************************** Step "+ str(i) +"Out of "+ str(len(frames))+"***************************")
         return detections
 
     def get_object_tracks(self, frames):
         
-        
-
+    
         detections = self.detect_frames(frames)
 
         tracks={
@@ -177,6 +183,32 @@ class Tracker:
         cv2.putText(frame, f"Team 2 Ball Control: {team_2*100:.2f}%",(1400,950), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 3)
 
         return frame
+    
+    def render_radar( detections: sv.Detections,  keypoints: sv.KeyPoints,color_lookup: np.ndarray) -> np.ndarray:
+     CONFIG = SoccerPitchConfiguration()
+     COLORS = ['#FF1493', '#00BFFF', '#FF6347', '#FFD700']
+     mask = (keypoints.xy[0][:, 0] > 1) & (keypoints.xy[0][:, 1] > 1)
+     transformer = ViewTransformer(
+        source=keypoints.xy[0][mask].astype(np.float32),
+        target=np.array(CONFIG.vertices)[mask].astype(np.float32) )
+     
+     xy = detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
+     transformed_xy = transformer.transform_points(points=xy)
+
+     radar = draw_pitch(config=CONFIG)
+     radar = draw_points_on_pitch(
+        config=CONFIG, xy=transformed_xy[color_lookup == 0],
+        face_color=sv.Color.from_hex(COLORS[0]), radius=20, pitch=radar)
+     radar = draw_points_on_pitch(
+        config=CONFIG, xy=transformed_xy[color_lookup == 1],
+        face_color=sv.Color.from_hex(COLORS[1]), radius=20, pitch=radar)
+     radar = draw_points_on_pitch(
+        config=CONFIG, xy=transformed_xy[color_lookup == 2],
+        face_color=sv.Color.from_hex(COLORS[2]), radius=20, pitch=radar)
+     radar = draw_points_on_pitch(
+        config=CONFIG, xy=transformed_xy[color_lookup == 3],
+        face_color=sv.Color.from_hex(COLORS[3]), radius=20, pitch=radar)
+     return radar
 
     def draw_annotations(self,video_frames, tracks,team_ball_control):
         output_video_frames= []
@@ -202,6 +234,17 @@ class Tracker:
             # Draw ball 
             for track_id, ball in ball_dict.items():
                 frame = self.draw_traingle(frame, ball["bbox"],(0,255,0))
+
+            h, w, _ = frame.shape
+            radar = render_radar(detections, keypoints, color_lookup)
+            radar = sv.resize_image(radar, (w // 2, h // 2))
+            radar_h, radar_w, _ = radar.shape
+            rect = sv.Rect(
+             x=w // 2 - radar_w // 2,
+             y=h - radar_h,
+             width=radar_w,
+             height=radar_h
+            )
 
 
             # Draw Team Ball Control
