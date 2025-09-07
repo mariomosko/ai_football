@@ -1,3 +1,5 @@
+
+https://github.com/user-attachments/assets/627d0e3b-6461-403b-ab7d-6f6fcbf7294d
 # ai_football
 
 This Project provides a comprehensive tracking pipeline for football (soccer) analytics using deep learning and computer vision. It leverages YOLO models for object and pitch detection, and integrates tracking, annotation, and visualization utilities for sports analytics.
@@ -20,6 +22,10 @@ Calculates and displays the percentage of ball possession for each team over tim
 
 Modular Design:
 Functions are organized for easy extension, including methods for detection, tracking, annotation, and radar rendering.
+
+
+
+https://github.com/user-attachments/assets/b71b09eb-2527-40b7-b055-3f89ade61cdd
 
 
 ## Data Attribution
