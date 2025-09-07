@@ -7,13 +7,14 @@ from player_ball_assigner import PlayerBallAssigner
 
 def main():
     # Read Video
-    video_frames = read_video('input_videos/08fd33_4.mp4')
+    video_frames = read_video('input_videos/C35bd9041_0 (16).mp4')
 
 
     # Initialize Tracker
-    tracker = Tracker('best_yolov8x_100ep.pt','best_yolov8x_100ep.pt')
+    tracker = Tracker('best_yolov8x_100ep.pt','best_pitch_detection_yolov8l_100ep.pt')
 
-    tracks = tracker.get_object_tracks(video_frames)
+    tracks,pitch_detections,detections = tracker.get_object_tracks(video_frames)
+   
     # Get object positions 
     tracker.add_position_to_tracks(tracks)
 
@@ -53,7 +54,7 @@ def main():
     
     # Draw output 
     ## Draw object Tracks
-    output_video_frames = tracker.draw_annotations(video_frames, tracks,team_ball_control)
+    output_video_frames = tracker.draw_annotations(video_frames, tracks,team_ball_control,pitch_detections,detections)
 
     # Save video
     save_video(output_video_frames, 'output_videos/output_video.avi')
