@@ -11,6 +11,7 @@ from sports.common.ball import BallTracker, BallAnnotator
 from sports.common.team import TeamClassifier
 from sports.common.view import ViewTransformer
 from sports.configs.soccer import SoccerPitchConfiguration
+import matplotlib.pyplot as plt
 sys.path.append('../')
 from utils import get_center_of_bbox, get_bbox_width, get_foot_position
 
@@ -19,6 +20,9 @@ class Tracker:
         self.model = YOLO(model_path) 
         self.tracker = sv.ByteTrack()
         self.pitch_model=YOLO(pitch_detection_model)
+
+        self.all_keypoints =[]
+        self.all_pitch_detections = []
        
     def add_position_to_tracks(sekf,tracks):
         for object, object_tracks in tracks.items():
@@ -46,16 +50,20 @@ class Tracker:
     def detect_frames(self, frames):
         batch_size=20 
         detections = [] 
+        pitch_detections = []
         for i in range(0,len(frames),batch_size):
             detections_batch = self.model.predict(frames[i:i+batch_size],conf=0.1)
+            pitch_detections_batch = self.pitch_model.predict(frames[i:i+batch_size],conf=0.1)
             detections += detections_batch
+            pitch_detections += pitch_detections_batch
+        
             print("************************** Step "+ str(i) +"Out of "+ str(len(frames))+"***************************")
-        return detections
+        return detections,pitch_detections
 
     def get_object_tracks(self, frames):
         
     
-        detections = self.detect_frames(frames)
+        detections,pitch_detections = self.detect_frames(frames)
 
         tracks={
             "players":[],
@@ -69,6 +77,7 @@ class Tracker:
 
             # Covert to supervision Detection format
             detection_supervision = sv.Detections.from_ultralytics(detection)
+            
 
             # Convert GoalKeeper to player object
             for object_ind , class_id in enumerate(detection_supervision.class_id):
@@ -99,10 +108,18 @@ class Tracker:
 
                 if cls_id == cls_names_inv['ball']:
                     tracks["ball"][frame_num][1] = {"bbox":bbox}
+           
+                
+        
 
-    
-    
-        return tracks
+            
+                
+          
+            #radar = self.render_radar(pitch_detection_supervision, self.all_keypoints, self.colors)
+        
+                
+      
+        return tracks,pitch_detections,detections
     
     def draw_ellipse(self,frame,bbox,color,track_id=None):
         y2 = int(bbox[3])
@@ -165,7 +182,7 @@ class Tracker:
 
         return frame
 
-    def draw_team_ball_control(self,frame,frame_num,team_ball_control):
+    def draw_team_ball_control(self,frame,frame_num,team_ball_control,radar):
         # Draw a semi-transparent rectaggle 
         overlay = frame.copy()
         cv2.rectangle(overlay, (1350, 850), (1900,970), (255,255,255), -1 )
@@ -184,45 +201,77 @@ class Tracker:
 
         return frame
     
-    def render_radar( detections: sv.Detections,  keypoints: sv.KeyPoints,color_lookup: np.ndarray) -> np.ndarray:
+    def render_radar(self, detections: sv.Detections,  keypoints: sv.KeyPoints,color_lookup: np.ndarray) -> np.ndarray:
      CONFIG = SoccerPitchConfiguration()
-     COLORS = ['#FF1493', '#00BFFF', '#FF6347', '#FFD700']
+     COLORS = ['#FF1493', "#07013E", '#FF6347', '#FFD700']
      mask = (keypoints.xy[0][:, 0] > 1) & (keypoints.xy[0][:, 1] > 1)
      transformer = ViewTransformer(
         source=keypoints.xy[0][mask].astype(np.float32),
         target=np.array(CONFIG.vertices)[mask].astype(np.float32) )
      
      xy = detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
+    
+     
      transformed_xy = transformer.transform_points(points=xy)
+     
+
+     # --- handle color_lookup being either a palette (list of hex strings) OR an index array per-anchor
+     # if a palette was passed (list of hex strings), create an index array that assigns all points to color 0
+     if isinstance(color_lookup, (list, tuple)) and all(isinstance(c, str) for c in color_lookup):
+         color_indices = np.zeros(len(transformed_xy), dtype=int)
+     else:
+         color_indices = np.asarray(color_lookup, dtype=int)
+         if color_indices.ndim > 1:
+             color_indices = color_indices.ravel()
+         # if lengths mismatch, fallback to all zeros so points are visible
+         if len(color_indices) != len(transformed_xy):
+             color_indices = np.zeros(len(transformed_xy), dtype=int)
+     # --------------------------------------------------------------------
 
      radar = draw_pitch(config=CONFIG)
+ 
      radar = draw_points_on_pitch(
-        config=CONFIG, xy=transformed_xy[color_lookup == 0],
+        config=CONFIG, xy=transformed_xy[color_indices == 0],
         face_color=sv.Color.from_hex(COLORS[0]), radius=20, pitch=radar)
      radar = draw_points_on_pitch(
-        config=CONFIG, xy=transformed_xy[color_lookup == 1],
+        config=CONFIG, xy=transformed_xy[color_indices == 1],
         face_color=sv.Color.from_hex(COLORS[1]), radius=20, pitch=radar)
      radar = draw_points_on_pitch(
-        config=CONFIG, xy=transformed_xy[color_lookup == 2],
+        config=CONFIG, xy=transformed_xy[color_indices == 2],
         face_color=sv.Color.from_hex(COLORS[2]), radius=20, pitch=radar)
      radar = draw_points_on_pitch(
-        config=CONFIG, xy=transformed_xy[color_lookup == 3],
+        config=CONFIG, xy=transformed_xy[color_indices == 3],
         face_color=sv.Color.from_hex(COLORS[3]), radius=20, pitch=radar)
+    
+     
+
+
+     
      return radar
 
-    def draw_annotations(self,video_frames, tracks,team_ball_control):
+    def draw_annotations(self,video_frames, tracks,team_ball_control,pitch_detections,detections):
         output_video_frames= []
-        for frame_num, frame in enumerate(video_frames):
-            frame = frame.copy()
+        CONFIG = SoccerPitchConfiguration()
+        radar = draw_pitch(config=CONFIG)
 
+       
+        for frame_num, (frame, pitch_detection,detection) in enumerate(zip(video_frames, pitch_detections,detections)):
+            
+            frame = frame.copy()
+            h, w, _ = frame.shape
+           
             player_dict = tracks["players"][frame_num]
+           
+          
             ball_dict = tracks["ball"][frame_num]
             referee_dict = tracks["referees"][frame_num]
 
             # Draw Players
             for track_id, player in player_dict.items():
                 color = player.get("team_color",(0,0,255))
+          
                 frame = self.draw_ellipse(frame, player["bbox"],color, track_id)
+               
 
                 if player.get('has_ball',False):
                     frame = self.draw_traingle(frame, player["bbox"],(0,0,255))
@@ -235,20 +284,37 @@ class Tracker:
             for track_id, ball in ball_dict.items():
                 frame = self.draw_traingle(frame, ball["bbox"],(0,255,0))
 
+          
+            detection_supervision = sv.Detections.from_ultralytics(detection)
+            keypoints = sv.KeyPoints.from_ultralytics(pitch_detection)
             h, w, _ = frame.shape
-            radar = render_radar(detections, keypoints, color_lookup)
+            cls_names = getattr(detection, "names", {})              # ultralytics name map (id -> name)
+            name_to_id = {v: k for k, v in cls_names.items()}  
+            class_ids = np.asarray(detection_supervision.class_id, dtype=int)
+            color_indices = np.zeros(len(class_ids), dtype=int)
+            if "player" in name_to_id:
+                team = player.get("team")
+                color_indices[class_ids == name_to_id["player"]] = 1
+            if "referee" in name_to_id:
+                color_indices[class_ids == name_to_id["referee"]] = 3
+            if "ball" in name_to_id:
+                color_indices[class_ids == name_to_id["ball"]] = 2
+            radar = self.render_radar(detection_supervision, keypoints, color_indices)
+           
             radar = sv.resize_image(radar, (w // 2, h // 2))
             radar_h, radar_w, _ = radar.shape
             rect = sv.Rect(
-             x=w // 2 - radar_w // 2,
-             y=h - radar_h,
-             width=radar_w,
-             height=radar_h
-            )
+            x=w // 2 - radar_w // 2,
+            y=h - radar_h,
+            width=radar_w,
+            height=radar_h
+        )
+            frame= sv.draw_image(frame, radar, opacity=0.5, rect=rect)
+          
 
-
+            
             # Draw Team Ball Control
-            frame = self.draw_team_ball_control(frame, frame_num, team_ball_control)
+            frame = self.draw_team_ball_control(frame, frame_num, team_ball_control,radar)
 
             output_video_frames.append(frame)
 
