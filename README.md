@@ -24,10 +24,6 @@ Modular Design:
 Functions are organized for easy extension, including methods for detection, tracking, annotation, and radar rendering.
 
 
-
-https://github.com/user-attachments/assets/b71b09eb-2527-40b7-b055-3f89ade61cdd
-
-
 ## Data Attribution
 
 This project uses a video from the dataset:
